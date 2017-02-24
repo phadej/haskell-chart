@@ -102,6 +102,10 @@ data FileOptions = FileOptions {
 instance Default FileOptions where
   def =  FileOptions (800,600) SVG loadSansSerifFonts
 
+-------------------------------------------------------------------------------
+-- File
+-------------------------------------------------------------------------------
+
 -- | Generate an image file for the given renderable, at the specified path. Size, format,
 -- and text rendering mode are all set through the `FileOptions` parameter.
 renderableToFile :: FileOptions -> FilePath -> Renderable a -> IO (PickFn a)
@@ -118,10 +122,21 @@ toFile fo path ec = void $ renderableToFile fo path (toRenderable (execEC ec))
 -- | Generate an image file for the given drawing instructions, at the specified path. Size and
 -- format are set through the `FileOptions` parameter.
 cBackendToFile :: FileOptions -> BackendProgram a -> FilePath -> IO a
-cBackendToFile fo cb path = do
+cBackendToFile fb cb path = do
   fontSelector <- _fo_fonts fo
-  let env = createEnv vectorAlignmentFns w h fontSelector
+  (bs, a) <- cBackendToByteString fontSelector fo cb
+  BS.writeFile path bs
+  return a
 
+-------------------------------------------------------------------------------
+-- To ByteString
+-------------------------------------------------------------------------------
+
+toByteString :: (Default r,ToRenderable r) => FontSelector Double -> FileOptions -> EC r () -> BS.ByteString
+toByteString fontSelector fo ec = fst $ renderableToByteString fontSelector fo (toRenderable (execEC ec))
+
+cBackendToBS :: FontSelector Double -> FileOptions -> BackendProgram a -> (BS.ByteString, a)
+cBackendToBS fontSelector fo cb =
   case _fo_format fo of
     EPS -> do
       let (d, a) = runBackend env cb
@@ -132,8 +147,7 @@ cBackendToFile fo cb path = do
       let (d, a) = runBackend env cb
           opts = DSVG.SVGOptions (D2.dims2D w h) Nothing T.empty [] True
           svg = D.renderDia DSVG.SVG opts d
-      Svg.renderToFile path svg
-      return a
+      (Svg.renderBS svg, a)
     SVG_EMBEDDED -> do
       let
         (d, a, gs) = runBackendWithGlyphs env cb
@@ -146,9 +160,9 @@ cBackendToFile fo cb path = do
                                                          }
                        makeSvgFont font usedGs
         svg = D.renderDia DSVG.SVG (DSVG.SVGOptions (D2.dims2D w h) fontDefs T.empty [] True) d
-      Svg.renderToFile path svg
-      return a
+      in (Svg.renderBS svg, a)
   where
+    env = createEnv vectorAlignmentFns w h fontSelector
     (w,h) = _fo_size fo
 
 -- -----------------------------------------------------------------------
